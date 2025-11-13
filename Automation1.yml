@@ -1,0 +1,60 @@
+name: Run Full Automation (manual)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  run-automation:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show repository root (diagnostic)
+        run: |
+          echo "Workspace: $GITHUB_WORKSPACE"
+          echo "Listing repo root:"
+          ls -la
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies if present
+        run: |
+          if [ -f Full_Automation/requirements.txt ]; then
+            python -m pip install --upgrade pip
+            pip install -r Full_Automation/requirements.txt
+          else
+            echo "No requirements.txt found; skipping pip install."
+          fi
+
+      - name: Run automation command from command.txt (with safety checks)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPO_SUBDIR="Full_Automation"
+
+          echo "Checking for directory: $REPO_SUBDIR"
+          if [ ! -d "$REPO_SUBDIR" ]; then
+            echo "ERROR: directory '$REPO_SUBDIR' not found under repository root." >&2
+            echo "Contents of repo root (for debugging):"
+            ls -la
+            exit 1
+          fi
+
+          cd "$REPO_SUBDIR"
+
+          if [ ! -f command.txt ]; then
+            echo "ERROR: command.txt not found in $REPO_SUBDIR" >&2
+            exit 1
+          fi
+
+          CMD=$(cat command.txt)
+          echo "Executing command from command.txt:"
+          echo "  $CMD"
+
+          bash -lc "$CMD"

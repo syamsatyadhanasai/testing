@@ -1,0 +1,43 @@
+name: Run Full Automation (manual)
+
+on:
+  workflow_dispatch: {}   # only manual runs from the Actions tab
+
+jobs:
+  run-automation:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies if present
+        run: |
+          if [ -f Full_Automation/requirements.txt ]; then
+            python -m pip install --upgrade pip
+            pip install -r Full_Automation/requirements.txt
+          else
+            echo "No requirements.txt found; skipping pip install."
+          fi
+
+      - name: Run automation command from command.txt
+        working-directory: Full_Automation
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -f command.txt ]; then
+            echo "ERROR: Full_Automation/command.txt not found" >&2
+            exit 1
+          fi
+
+          CMD=$(cat command.txt)
+          echo "Executing command from command.txt:"
+          echo "  $CMD"
+
+          bash -lc "$CMD"

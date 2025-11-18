@@ -3,6 +3,10 @@ name: Run Full Automation
 on:
   workflow_dispatch: {}  
 
+# GITHUB_TOKEN can stay read-only; PAT will do the pushing
+permissions:
+  contents: read
+
 jobs:
   run-automation:
     runs-on: axep-ubuntu-latest-medium
@@ -10,11 +14,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      # needed for proper git history when committing
 
       - name: Show repository root (diagnostic)
         run: |
           echo "Workspace: $GITHUB_WORKSPACE"
-          echo "Listing repo root:"
           ls -la
 
       - name: Setup Python
@@ -24,61 +29,79 @@ jobs:
 
       - name: Install dependencies if present
         run: |
-          if [ -f Full_Automation/requirements.txt ]; then
+          if [ -f Full_automation/requirements.txt ]; then
             python -m pip install --upgrade pip
-            pip install -r Full_Automation/requirements.txt
+            pip install -r Full_automation/requirements.txt
           else
             echo "No requirements.txt found; skipping pip install."
           fi
 
-      - name: Run automation command from command.txt (with safety checks & log file)
+      - name: Run automation and create log file
         shell: bash
         run: |
           set -euo pipefail
 
-          REPO_SUBDIR="Full_Automation"
-
-          echo "Checking for directory: $REPO_SUBDIR"
-          if [ ! -d "$REPO_SUBDIR" ]; then
-            echo "❌ ERROR: directory '$REPO_SUBDIR' not found under repository root." >&2
-            echo "Contents of repo root:"
-            ls -la
-            exit 1
-          fi
-
-          cd "$REPO_SUBDIR"
-          echo "Current directory: $(pwd)"
+          cd Full_automation
 
           if [ ! -f command.txt ]; then
-            echo "❌ ERROR: command.txt not found inside $REPO_SUBDIR" >&2
+            echo "❌ ERROR: command.txt missing" >&2
             exit 1
           fi
 
           CMD=$(cat command.txt)
 
-          # Try to extract DAG name from the command: supports "--dag value" or "--dag=value"
+          # Extract DAG name from command: supports "--dag value" or "--dag=value"
           DAG_NAME=""
           if [[ "$CMD" =~ --dag[=[:space:]]*([^[:space:]]+) ]]; then
             DAG_NAME="${BASH_REMATCH[1]}"
-          fi
-
-          if [ -z "$DAG_NAME" ]; then
-            echo "⚠️  Could not find --dag in command. Using 'unknown_dag' as base log name."
+          else
             DAG_NAME="unknown_dag"
           fi
 
-          # Ensure Logs folder exists
+          # Ensure Logs directory exists
           mkdir -p Logs
 
-          # Timestamp for log file
+          # Build timestamped log file name
           TS=$(date +%Y%m%d_%H%M%S)
           LOGFILE="Logs/${DAG_NAME}_${TS}.txt"
 
-          echo "--------------------------------------"
-          echo "▶ Running command from command.txt:"
-          echo "$CMD"
-          echo "▶ Log file will be: $(pwd)/$LOGFILE"
-          echo "--------------------------------------"
+          echo "▶ Running command: $CMD"
+          echo "▶ Logging to: $(pwd)/$LOGFILE"
 
-          # Run command, capture stdout+stderr to log file and show in Actions logs
+          # Run the command; capture stdout+stderr to the log and show in Actions logs
           bash -lc "$CMD" 2>&1 | tee "$LOGFILE"
+
+          echo "-------------------------------------"
+          echo "Log created at: $(pwd)/$LOGFILE"
+          echo "-------------------------------------"
+
+      - name: Commit log back to repo using PAT
+        env:
+          PAT_TOKEN: ${{ secrets.REPO_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Basic git identity for the commit
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Stage any new/updated log files
+          git add Full_automation/Logs/*.txt || echo "No log files to add"
+
+          # If nothing staged, exit gracefully
+          if git diff --cached --quiet; then
+            echo "No new log files to commit."
+            exit 0
+          fi
+
+          # Create commit
+          git commit -m "Add DAG logs on $(date '+%Y-%m-%d %H:%M:%S')" || echo "Nothing to commit"
+
+          # Configure 'origin' to use PAT securely (do NOT echo this URL)
+          # GITHUB_SERVER_URL example: https://github.com
+          # GITHUB_REPOSITORY example: org-name/repo-name
+          git remote set-url origin "https://x-access-token:${PAT_TOKEN}@${GITHUB_SERVER_URL#https://}/${GITHUB_REPOSITORY}.git"
+
+          # Push to current branch
+          git push origin HEAD

@@ -1,0 +1,50 @@
+      - name: Run automation command from command.txt (with safety checks & log file)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          REPO_SUBDIR="Full_Automation"
+
+          echo "Checking for directory: $REPO_SUBDIR"
+          if [ ! -d "$REPO_SUBDIR" ]; then
+            echo "❌ ERROR: directory '$REPO_SUBDIR' not found under repository root." >&2
+            echo "Contents of repo root:"
+            ls -la
+            exit 1
+          fi
+
+          cd "$REPO_SUBDIR"
+          echo "Current directory: $(pwd)"
+
+          if [ ! -f command.txt ]; then
+            echo "❌ ERROR: command.txt not found inside $REPO_SUBDIR" >&2
+            exit 1
+          fi
+
+          CMD=$(cat command.txt)
+
+          # Extract DAG name
+          DAG_NAME=""
+          if [[ "$CMD" =~ --dag[=[:space:]]*([^[:space:]]+) ]]; then
+            DAG_NAME="${BASH_REMATCH[1]}"
+          fi
+
+          if [ -z "$DAG_NAME" ]; then
+            echo "⚠️  Could not find --dag in command. Using 'unknown_dag' as base log name."
+            DAG_NAME="unknown_dag"
+          fi
+
+          # Ensure Logs folder exists
+          mkdir -p Logs
+
+          # Build timestamped log file path
+          TS=$(date +%Y%m%d_%H%M%S)
+          LOGFILE="Logs/${DAG_NAME}_${TS}.txt"
+
+          echo "--------------------------------------"
+          echo "▶ Running command from command.txt:"
+          echo "$CMD"
+          echo "▶ Log file will be: $(pwd)/$LOGFILE"
+          echo "--------------------------------------"
+
+          bash -lc "$CMD" 2>&1 | tee "$LOGFILE"
